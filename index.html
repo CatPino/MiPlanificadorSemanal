@@ -83,6 +83,11 @@ input,select,textarea{font:inherit;color:var(--ink)}
 .legend{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
 .chip{display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 12px;border-radius:30px;background:var(--surface-2);border:1px solid var(--line);font-size:12.5px;font-weight:600;color:var(--ink-mid);white-space:nowrap}
 .chip i{width:9px;height:9px;border-radius:50%}
+.chip-x{width:20px;height:20px;margin-right:-6px;border:0;border-radius:50%;background:transparent;color:var(--ink-soft);font-size:10.5px;display:grid;place-items:center}
+.chip-x:hover{background:rgba(194,65,12,.12);color:var(--danger)}
+.danger-btn{height:38px;border:0;border-radius:10px;background:var(--danger);color:#fff;padding:0 16px;font-size:13.5px;font-weight:700}
+.danger-btn:hover{filter:brightness(1.08)}
+.dtext{margin:0;font-size:14px;line-height:1.5;color:var(--ink-mid)}
 .chip.add{background:transparent;border-style:dashed;color:var(--accent);font-weight:700}
 .chip.add:hover{background:var(--accent-soft)}
 .states{display:flex;align-items:center;gap:14px;margin-left:auto;font-size:12px;color:var(--ink-soft)}
@@ -255,6 +260,14 @@ body.is-dragging,body.is-dragging *{cursor:grabbing!important}
   </form>
 </div>
 
+<div class="overlay" id="delDlg" hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="delTitle">
+    <div class="dhead"><h2 id="delTitle">Eliminar proyecto</h2><button class="x" type="button" data-close aria-label="Cerrar">✕</button></div>
+    <p class="dtext" id="delText"></p>
+    <div class="drow"><button class="ghost" type="button" data-close>Cancelar</button><button class="danger-btn" type="button" id="delYes">Eliminar</button></div>
+  </div>
+</div>
+
 <div class="toast" id="toast" hidden><span id="toastMsg"></span><button id="toastUndo" type="button">Deshacer</button></div>
 
 <script type="application/json" id="seed">null</script>
@@ -359,7 +372,7 @@ function fit(){
 function render(){
   curKey=workKey();
   const vis=visible();
-  $('legend').innerHTML=projects.map(p=>`<span class="chip"><i style="background:${pcol(p)}"></i>${esc(p)}</span>`).join('')
+  $('legend').innerHTML=projects.map(p=>`<span class="chip"><i style="background:${pcol(p)}"></i>${esc(p)}<button class="chip-x" type="button" data-delproj="${esc(p)}" aria-label="Eliminar proyecto ${esc(p)}" title="Eliminar proyecto">✕</button></span>`).join('')
     +'<button class="chip add" type="button" data-newproj>+ Proyecto</button>';
   const fp=$('fProj'), keepP=fp.value;
   fp.innerHTML=projects.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('');
@@ -434,11 +447,11 @@ $('board').addEventListener('click',e=>{
   const btn=e.target.closest('button[data-act]'); if(!btn) return;
   const f=find(btn.closest('.card').dataset.id); if(!f) return; const [k,i]=f;
   if(btn.dataset.act==='st'){tasks[k][i].s=((tasks[k][i].s||0)+1)%3}
-  if(btn.dataset.act==='del'){const [a]=tasks[k].splice(i,1);undo={a,k,i};showToast(`Eliminada: ${a.t}`)}
+  if(btn.dataset.act==='del'){const [a]=tasks[k].splice(i,1);showToast(`Eliminada: ${a.t}`,()=>{list(k).splice(i,0,a)})}
   render();
 },true);
-function showToast(m){$('toastMsg').textContent=m;$('toast').hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>{$('toast').hidden=true;undo=null},6000)}
-$('toastUndo').addEventListener('click',()=>{if(undo){list(undo.k).splice(undo.i,0,undo.a);undo=null;render()}$('toast').hidden=true});
+function showToast(m,u){undo=u||null;$('toastMsg').textContent=m;$('toastUndo').hidden=!undo;$('toast').hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>{$('toast').hidden=true;undo=null},6000)}
+$('toastUndo').addEventListener('click',()=>{if(undo){const u=undo;undo=null;u();render()}$('toast').hidden=true});
 
 // Edición del texto
 $('board').addEventListener('click',e=>{
@@ -558,7 +571,7 @@ function weekOptions(sel){
   $('fWeek').value=sel&&fopts.includes(sel)?sel:(vis.includes(curKey)?curKey:start);
 }
 function setState(s){fState=s;$('fState').querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',+b.dataset.s===s))}
-function openAct(week){weekOptions(week);setState(0);$('fName').value='';$('actDlg').hidden=false;setTimeout(()=>$('fName').focus(),30)}
+function openAct(week){if(!projects.length){openProj();return}weekOptions(week);setState(0);$('fName').value='';$('actDlg').hidden=false;setTimeout(()=>$('fName').focus(),30)}
 function closeAct(){$('actDlg').hidden=true}
 document.addEventListener('click',e=>{const b=e.target.closest('[data-add]');if(!b||justDragged)return;openAct(b.dataset.add||(window.innerWidth<=900?mw:null))});
 $('fState').addEventListener('click',e=>{const b=e.target.closest('button[data-s]');if(b)setState(+b.dataset.s)});
@@ -592,6 +605,31 @@ $('projForm').addEventListener('submit',e=>{
   if(projects.some(p=>p.toLowerCase()===n.toLowerCase())){$('pErr').textContent='Ya existe un proyecto con ese nombre.';return}
   projects.push(n); pcolors[n]=pickColor; closeProj();
   render(); $('fProj').value=n; showToast(`Proyecto creado: ${n}`);
+});
+
+// Eliminar proyecto (con confirmación y opción de deshacer)
+let delName=null;
+$('legend').addEventListener('click',e=>{
+  const b=e.target.closest('[data-delproj]'); if(!b) return;
+  delName=b.dataset.delproj;
+  const n=Object.values(tasks).reduce((s,l)=>s+l.filter(a=>a.p===delName).length,0);
+  $('delText').innerHTML=`¿Eliminar el proyecto <b>${esc(delName)}</b>?`+(n?`<br>También se eliminarán sus <b>${n} ${n===1?'actividad':'actividades'}</b> de todas las semanas.`:'<br>No tiene actividades.');
+  $('delYes').textContent=n?`Eliminar proyecto y ${n} ${n===1?'actividad':'actividades'}`:'Eliminar proyecto';
+  $('delDlg').hidden=false; $('delYes').focus();
+});
+const closeDel=()=>{$('delDlg').hidden=true;delName=null};
+$('delDlg').addEventListener('click',e=>{if(e.target===$('delDlg')||e.target.closest('[data-close]'))closeDel()});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('delDlg').hidden)closeDel()});
+$('delYes').addEventListener('click',()=>{
+  const name=delName; if(!name) return;
+  const pi=projects.indexOf(name), color=pcolors[name], removed=[];
+  for(const k in tasks){for(let i=tasks[k].length-1;i>=0;i--){if(tasks[k][i].p===name)removed.push([k,i,tasks[k].splice(i,1)[0]])}}
+  if(pi>-1)projects.splice(pi,1); delete pcolors[name];
+  closeDel(); render();
+  showToast(`Proyecto eliminado: ${name}`,()=>{
+    projects.splice(Math.max(0,pi),0,name); pcolors[name]=color;
+    removed.slice().reverse().forEach(([k,i,a])=>list(k).splice(i,0,a));
+  });
 });
 
 $('wtabs').addEventListener('click',e=>{const b=e.target.closest('button[data-mw]');if(!b)return;mw=b.dataset.mw;render()});

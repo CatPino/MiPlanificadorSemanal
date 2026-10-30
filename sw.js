@@ -1,6 +1,6 @@
 // Guarda la app en el dispositivo para que abra sin internet.
 // Al publicar una versión nueva, cambia el número de VERSION.
-const VERSION = 'planificacion-v8';
+const VERSION = 'planificacion-v9';
 const FILES = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './icon-maskable-512.png', './apple-touch-icon.png'];
 
 self.addEventListener('install', e => {
